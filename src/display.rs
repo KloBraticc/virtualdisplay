@@ -17,7 +17,7 @@ use std::{
 };
 
 /// how long to wait between attempts at settling the display
-const POLL_TICK_NS: i64 = 500_000_000;
+const POLL_TICK_NS: i64 = 100_000_000;
 /// how many setup attempts before we stop touching the display config
 const MAX_ATTEMPTS: u32 = 30;
 /// how many times we may break/re-mirror to force the main role over
@@ -42,6 +42,7 @@ struct Display {
     forces: u32,
     waits: u32,
     token: u64,
+    polling: bool,
 }
 
 static META_LOCK: RwLock<Option<DisplayMeta>> = RwLock::new(None);
@@ -64,10 +65,9 @@ pub fn start() -> i32 {
         }
         match Display::start() {
             Some(mut d) => {
-                let token = d.token;
                 d.ensure();
+                d.arm_poll();
                 *slot = Some(d);
-                schedule_poll(token);
                 0
             }
             None => -1,
@@ -99,8 +99,9 @@ fn schedule_poll(token: u64) {
         }
         DISPLAY.with_borrow_mut(|slot| {
             let Some(d) = slot.as_mut() else { return };
+            d.polling = false;
             d.ensure();
-            schedule_poll(token);
+            d.arm_poll();
         });
     });
 }
@@ -114,7 +115,6 @@ fn build_config(meta: &DisplayMeta) -> Option<Config<'_>> {
     let mode_h = CGDisplayMode::height(Some(&mode));
 
     let is_native = meta.width.is_none() && meta.height.is_none();
-    eprintln!("is_native={is_native}");
 
     // GUARD:
     // Width OR Height manual management
@@ -124,8 +124,6 @@ fn build_config(meta: &DisplayMeta) -> Option<Config<'_>> {
 
     let width = meta.width.unwrap_or(mode_w);
     let height = meta.height.unwrap_or(mode_h);
-    eprintln!("width={width}");
-    eprintln!("height={height}");
 
     // GUARD:
     // CG Will probably segfault getting this
@@ -136,8 +134,6 @@ fn build_config(meta: &DisplayMeta) -> Option<Config<'_>> {
     
     let pixel_width = width.checked_mul(scale)?;
     let pixel_height = height.checked_mul(scale)?;
-    eprintln!("pixel_width={pixel_width}");
-    eprintln!("pixel_height={pixel_height}");
 
     let mm = CGDisplayScreenSize(main);
     let size_mm = if mm.width > 0.0 && mm.height > 0.0 {
@@ -184,7 +180,7 @@ fn build_config(meta: &DisplayMeta) -> Option<Config<'_>> {
 
 impl Display {
     fn start() -> Option<Self> {
-        let meta = META_LOCK.read().expect("aquire lock").as_ref().cloned().expect("call init() to set data details to use");
+        let meta = META_LOCK.read().ok()?.as_ref().cloned()?;
         let cfg = build_config(&meta)?;
 
         // GUARD:
@@ -221,7 +217,16 @@ impl Display {
             forces: 0,
             waits: 0,
             token,
+            polling: false,
         })
+    }
+
+    fn arm_poll(&mut self) {
+        if self.polling || self.done || self.attempts >= MAX_ATTEMPTS {
+            return;
+        }
+        self.polling = true;
+        schedule_poll(self.token);
     }
 
     /// Get the virtual display to a state where apps vsync against it:
@@ -328,13 +333,17 @@ impl Drop for Display {
 
 extern "C-unwind" fn on_reconfig(
     _id: CGDirectDisplayID,
-    _flags: CGDisplayChangeSummaryFlags,
+    flags: CGDisplayChangeSummaryFlags,
     _ctx: *mut c_void,
 ) {
+    if flags.contains(CGDisplayChangeSummaryFlags::BeginConfigurationFlag) {
+        return;
+    }
     DispatchQueue::main().exec_async(|| {
         DISPLAY.with_borrow_mut(|d| {
             if let Some(d) = d {
                 d.ensure();
+                d.arm_poll();
             }
         });
     });
