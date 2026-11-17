@@ -23,7 +23,7 @@ const MAX_ATTEMPTS: u32 = 30;
 /// how many times we may break/re-mirror to force the main role over
 const MAX_FORCES: u32 = 3;
 
-/// publically editable meta
+/// publicly editable meta
 /// by the user on `init()`
 #[derive(Clone)]
 pub struct DisplayMeta {
@@ -54,7 +54,7 @@ thread_local! {
 }
 
 pub fn init(s: DisplayMeta) -> i32 {
-    *META_LOCK.write().expect("aquire lock") = Some(s);
+    *META_LOCK.write().expect("acquire lock") = Some(s);
     0
 }
 
@@ -91,7 +91,7 @@ pub fn stop() -> i32 {
 }
 
 /// keep poking `ensure` until the display settles, mirroring the old
-/// Swift `pollForMirroring` timer the rust port dropped
+/// Swift `pollForMirroring` timer the Rust port dropped
 fn schedule_poll(token: u64) {
     let _ = DispatchQueue::main().after(DispatchTime::NOW.time(POLL_TICK_NS), move || {
         if POLL_GEN.with(|g| g.get()) != token {
@@ -126,7 +126,7 @@ fn build_config(meta: &DisplayMeta) -> Option<Config<'_>> {
     let height = meta.height.unwrap_or(mode_h);
 
     // GUARD:
-    // CG Will probably segfault getting this
+    // CG will probably segfault getting this
     // as a device.
     if width == 0 || height == 0 {
         return None;
@@ -146,8 +146,8 @@ fn build_config(meta: &DisplayMeta) -> Option<Config<'_>> {
         meta.rates.as_deref().unwrap_or(&[60.0, 120.0, 240.0]);
 
     // GUARD:
-    // No really retarded numbers like big precsion
-    // or dumb ones.
+    // No unreasonable numbers like too much precision
+    // or invalid ones.
     for rate in refresh_rates {
         let scaled = rate * 100.0;
         // GUARD:

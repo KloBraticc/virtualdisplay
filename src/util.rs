@@ -3,7 +3,7 @@
 use std::ffi::CStr;
 use std::os::raw::c_char;
 
-/// Implements tools to get from FFI string.
+/// Implements tools to convert from an FFI string.
 pub struct IStr(pub String);
 
 impl From<String> for IStr {
@@ -24,11 +24,11 @@ impl From<*const c_char> for IStr {
             return Self("".into());
         }
 
-        // SAFETY: We know that input it not null
+        // SAFETY: We know that input is not null
         //
-        // Though it is up to caller with the c_str
+        // Though it is up to the caller with the c_str
         // to provide a good string otherwise it would
-        // break the program anyways.
+        // break the program anyway.
         let cstr = unsafe {
             CStr::from_ptr(input)
         };

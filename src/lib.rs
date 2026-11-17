@@ -34,13 +34,13 @@ pub unsafe extern "C" fn init(
     let height = some_or_usize(height);
 
     // GUARD:
-    // Check if rates even has a data length
+    // Check that rates has any data
     if capacity == 0 {
         return -1;
     }
     
     // GUARD:
-    // Check if rates has good data
+    // Check that rates has valid data
     if item.is_null() || capacity > MAX_VEC_LEN {
         return -1;
     }
