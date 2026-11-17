@@ -13,8 +13,12 @@ use objc2::{
 };
 use objc2_core_foundation::CGSize;
 
-fn class(name: &std::ffi::CStr) -> &'static AnyClass {
-    AnyClass::get(name).unwrap_or_else(|| panic!("private class {name:?} not found"))
+fn class(name: &std::ffi::CStr) -> Option<&'static AnyClass> {
+    let class = AnyClass::get(name);
+    if class.is_none() {
+        eprintln!("[virtualdisplay] private class {name:?} not found");
+    }
+    class
 }
 
 pub struct VirtualDisplay(Retained<AnyObject>);
@@ -33,11 +37,11 @@ pub struct Config<'a> {
 impl VirtualDisplay {
     pub fn create(cfg: &Config) -> Option<Self> {
         unsafe {
-            let desc: Retained<AnyObject> = msg_send![class(c"CGVirtualDisplayDescriptor"), new];
+            let desc: Retained<AnyObject> = msg_send![class(c"CGVirtualDisplayDescriptor")?, new];
             let queue = DispatchQueue::main();
             let queue_ptr = &*queue as *const DispatchQueue as *mut AnyObject;
             let _: () = msg_send![&*desc, setQueue: queue_ptr];
-            let name = CString::new(cfg.name).unwrap();
+            let name = CString::new(cfg.name).ok()?;
             let ns_name: Retained<AnyObject> =
                 msg_send![class!(NSString), stringWithUTF8String: name.as_ptr()];
 
@@ -52,16 +56,17 @@ impl VirtualDisplay {
             let handler = RcBlock::new(|_: *mut AnyObject, _: *mut AnyObject| {});
             let _: () = msg_send![&*desc, setTerminationHandler: &*handler];
 
-            let alloc: Allocated<AnyObject> = msg_send![class(c"CGVirtualDisplay"), alloc];
+            let alloc: Allocated<AnyObject> = msg_send![class(c"CGVirtualDisplay")?, alloc];
             let vd: Option<Retained<AnyObject>> = msg_send![alloc, initWithDescriptor: &*desc];
             let vd = vd?;
 
+            let mode_class = class(c"CGVirtualDisplayMode")?;
             let modes: Vec<Retained<AnyObject>> = cfg
                 .refresh_rates
                 .iter()
                 .map(|&hz| {
                     let a: Allocated<AnyObject> =
-                        msg_send![class(c"CGVirtualDisplayMode"), alloc];
+                        msg_send![mode_class, alloc];
                     msg_send![
                         a,
                         initWithWidth: cfg.width as u32,
@@ -71,7 +76,7 @@ impl VirtualDisplay {
                 })
                 .collect();
 
-            let settings: Retained<AnyObject> = msg_send![class(c"CGVirtualDisplaySettings"), new];
+            let settings: Retained<AnyObject> = msg_send![class(c"CGVirtualDisplaySettings")?, new];
             let _: () = msg_send![&*settings, setHiDPI: u32::from(cfg.hidpi)];
 
             let ptrs: Vec<*const AnyObject> = modes

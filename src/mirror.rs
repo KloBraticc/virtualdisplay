@@ -10,6 +10,7 @@ pub struct Mirror {
     physical: CGDirectDisplayID,
     native_mode: Option<CFRetained<CGDisplayMode>>,
     swapped: bool,
+    origins: Vec<(CGDirectDisplayID, i32, i32)>,
 }
 
 impl Mirror {
@@ -18,6 +19,7 @@ impl Mirror {
             physical,
             native_mode: None,
             swapped: false,
+            origins: Vec::new(),
         }
     }
 
@@ -134,6 +136,16 @@ impl Mirror {
             return false;
         }
 
+        if !self.swapped {
+            self.origins = ids
+                .iter()
+                .map(|&id| {
+                    let b = CGDisplayBounds(id);
+                    (id, b.origin.x.round() as i32, b.origin.y.round() as i32)
+                })
+                .collect();
+        }
+
         let err = Self::configure_with(CGConfigureOption::ForSession, |cfg| {
             let mut result = CGError::Success;
             for &id in ids {
@@ -159,16 +171,43 @@ impl Mirror {
         main
     }
 
-    /// Put `physical` back at (0,0) and forget the swap.
+    /// Put every display back where it was before the swap and forget it.
     pub fn rollback_swap(&mut self) {
         if !self.swapped {
             return;
         }
         self.swapped = false;
+        self.restore_origins();
+    }
+
+    fn restore_origins(&mut self) {
+        let saved = std::mem::take(&mut self.origins);
+        let mut ids = [0 as CGDirectDisplayID; 32];
+        let mut count: u32 = 0;
+        if unsafe { CGGetActiveDisplayList(32, ids.as_mut_ptr(), &mut count) } != CGError::Success {
+            count = 0;
+        }
+        let active = &ids[..count.min(ids.len() as u32) as usize];
+        let restore: Vec<_> = saved
+            .into_iter()
+            .filter(|(id, _, _)| active.contains(id))
+            .collect();
         let physical = self.physical;
-        Self::configure_with(CGConfigureOption::ForSession, |cfg| unsafe {
-            CGConfigureDisplayOrigin(cfg, physical, 0, 0)
+        let err = Self::configure_with(CGConfigureOption::ForSession, |cfg| unsafe {
+            if restore.iter().all(|(id, _, _)| *id != physical) {
+                return CGConfigureDisplayOrigin(cfg, physical, 0, 0);
+            }
+            for &(id, x, y) in &restore {
+                let err = CGConfigureDisplayOrigin(cfg, id, x, y);
+                if err != CGError::Success {
+                    return err;
+                }
+            }
+            CGError::Success
         });
+        if err != CGError::Success {
+            eprintln!("[virtualdisplay] could not restore the display arrangement: {err:?}");
+        }
     }
 
     pub fn disable(&mut self) {
@@ -187,9 +226,6 @@ impl Mirror {
             if mirrored {
                 result = CGConfigureDisplayMirrorOfDisplay(cfg, physical, kCGNullDirectDisplay);
             }
-            if result == CGError::Success && swapped {
-                result = CGConfigureDisplayOrigin(cfg, physical, 0, 0);
-            }
             if result == CGError::Success
                 && let Some(m) = &mode
             {
@@ -199,6 +235,9 @@ impl Mirror {
         });
         if err != CGError::Success {
             eprintln!("[virtualdisplay] mirror teardown failed: {err:?}");
+        }
+        if swapped {
+            self.restore_origins();
         }
     }
 
