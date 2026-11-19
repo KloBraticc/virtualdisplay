@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define VD_NAME_CAPACITY 128
@@ -83,6 +84,13 @@ static struct {
 } session;
 
 static volatile int refresh_queued;
+static volatile uint32_t change_flags;
+static uint64_t started_ns;
+
+static unsigned long long elapsed_ms(void)
+{
+    return (unsigned long long)((clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - started_ns) / 1000000);
+}
 
 static void vd_log(const char *message, long value)
 {
@@ -370,7 +378,8 @@ static bool ensure(void)
     bool mirrored = mirrors(display);
     if (mirrored && CGDisplayIsMain(display)) {
         if (!session.settled)
-            vd_log("virtual display is main and mirrored, display", display);
+            fprintf(stderr, "[virtualdisplay] virtual display is main and mirrored at %llu ms, display %u\n", elapsed_ms(), display);
+        __atomic_store_n(&change_flags, 0, __ATOMIC_RELEASE);
         session.settled = true;
         session.ever_settled = true;
         session.attempts = 0;
@@ -378,7 +387,7 @@ static bool ensure(void)
         return false;
     }
     if (session.settled)
-        fprintf(stderr, "[virtualdisplay] macOS changed the arrangement, mirrored %d main %u mirror of %u, applying it again\n", mirrored, CGMainDisplayID(), CGDisplayMirrorsDisplay(session.physical));
+        fprintf(stderr, "[virtualdisplay] macOS changed the arrangement at %llu ms, flags %#x, mirrored %d main %u mirror of %u, applying it again\n", elapsed_ms(), __atomic_exchange_n(&change_flags, 0, __ATOMIC_ACQ_REL), mirrored, CGMainDisplayID(), CGDisplayMirrorsDisplay(session.physical));
     session.settled = false;
 
     if (session.attempts >= VD_MAX_ATTEMPTS)
@@ -455,6 +464,7 @@ static void reconfigured(CGDirectDisplayID display, CGDisplayChangeSummaryFlags 
     (void)context;
     if (flags & kCGDisplayBeginConfigurationFlag)
         return;
+    __atomic_fetch_or(&change_flags, flags, __ATOMIC_ACQ_REL);
     if (__atomic_exchange_n(&refresh_queued, 1, __ATOMIC_ACQ_REL))
         return;
     dispatch_async_f(dispatch_get_main_queue(), NULL, refresh);
@@ -600,6 +610,7 @@ static int start_on_main(void *argument)
         return -1;
 
     session.physical = physical;
+    started_ns = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
     session.generation++;
     CGDisplayRegisterReconfigurationCallback(reconfigured, NULL);
     void *pool = objc_autoreleasePoolPush();
