@@ -324,7 +324,7 @@ static bool ensure(void)
         return false;
     }
     if (session.settled)
-        vd_log("macOS changed the arrangement, applying it again for display", display);
+        fprintf(stderr, "[virtualdisplay] macOS changed the arrangement, mirrored %d main %u mirror of %u, applying it again\n", mirrored, CGMainDisplayID(), CGDisplayMirrorsDisplay(session.physical));
     session.settled = false;
 
     if (session.attempts >= VD_MAX_ATTEMPTS)
