@@ -26,6 +26,7 @@
 #define VD_MAX_FORCES 3
 #define VD_MAX_WAITS 100
 #define VD_MODE_CHECKS 20
+#define VD_ADD_CHECKS 20
 #define VD_RETRY_NS (50 * NSEC_PER_MSEC)
 #define VD_RECHECK_NS (300 * NSEC_PER_MSEC)
 #define VD_SETTLE_CHECKS 100
@@ -394,13 +395,14 @@ static bool ensure(void)
     CGDirectDisplayID display = session.virtual_display;
     if (!session.display)
         return false;
-    if (!session.added || !CGDisplayIsActive(display)) {
+    if (!CGDisplayIsActive(display) || (!session.added && session.waits < VD_ADD_CHECKS)) {
         if (session.ever_settled)
             return false;
         if (++session.waits % 20 == 0)
             vd_log("waiting for the virtual display to become active, check", session.waits);
         return session.waits < VD_MAX_WAITS;
     }
+    session.added = true;
     session.waits = 0;
 
     bool mirrored = mirrors(display);
