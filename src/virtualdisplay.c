@@ -83,6 +83,7 @@ static struct {
     uint32_t mode_checks;
     uintptr_t generation;
     bool swapped;
+    bool added;
     bool settled;
     bool ever_settled;
     bool retry_armed;
@@ -393,10 +394,10 @@ static bool ensure(void)
     CGDirectDisplayID display = session.virtual_display;
     if (!session.display)
         return false;
-    if (!CGDisplayIsActive(display)) {
+    if (!session.added || !CGDisplayIsActive(display)) {
         if (session.ever_settled)
             return false;
-        if (session.waits++ % 20 == 0)
+        if (++session.waits % 20 == 0)
             vd_log("waiting for the virtual display to become active, check", session.waits);
         return session.waits < VD_MAX_WAITS;
     }
@@ -490,10 +491,11 @@ static void refresh(void *context)
 
 static void reconfigured(CGDirectDisplayID display, CGDisplayChangeSummaryFlags flags, void *context)
 {
-    (void)display;
     (void)context;
     if (flags & kCGDisplayBeginConfigurationFlag)
         return;
+    if ((flags & kCGDisplayAddFlag) && display == session.virtual_display)
+        session.added = true;
     __atomic_fetch_or(&change_flags, flags, __ATOMIC_ACQ_REL);
     if (!session.settled)
         fprintf(stderr, "[virtualdisplay] trace at %llu ms, change %u flags %#x\n", elapsed_ms(), display, flags);
@@ -517,6 +519,7 @@ static void teardown(void)
     session.forces = 0;
     session.waits = 0;
     session.mode_checks = 0;
+    session.added = false;
     CGDirectDisplayID physical = session.physical;
     restore();
     for (int check = 0; check < VD_SETTLE_CHECKS && (CGDisplayIsInMirrorSet(physical) || CGMainDisplayID() != physical); check++)
@@ -525,7 +528,6 @@ static void teardown(void)
     release(display);
     objc_autoreleasePoolPop(pool);
     session.virtual_display = kCGNullDirectDisplay;
-    wait_for_removal();
 }
 
 static void terminated(void)
