@@ -332,9 +332,6 @@ static bool ensure(void)
     if (++session.attempts == VD_MAX_ATTEMPTS)
         vd_log("giving up after attempts", VD_MAX_ATTEMPTS);
 
-    if (!mirrored && !CGDisplayIsMain(display) && unmirror())
-        make_main(display);
-
     if (!mirrored) {
         mirrored = mirror_onto(display);
         if (!mirrored) {
