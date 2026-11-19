@@ -22,6 +22,7 @@
 #define VD_MAX_RATE 1000.0
 #define VD_MAX_ATTEMPTS 30
 #define VD_MAX_FORCES 3
+#define VD_MAX_WAITS 100
 #define VD_RETRY_NS (50 * NSEC_PER_MSEC)
 #define VD_DEFAULT_NAME "Voidstrap Virtual Display"
 
@@ -69,9 +70,11 @@ static struct {
     uint32_t origin_count;
     uint32_t attempts;
     uint32_t forces;
+    uint32_t waits;
     uintptr_t generation;
     bool swapped;
     bool settled;
+    bool ever_settled;
     bool retry_armed;
 } session;
 
@@ -295,27 +298,36 @@ static void restore(void)
     }
 }
 
-static void ensure(void)
+static bool ensure(void)
 {
     CGDirectDisplayID display = session.virtual_display;
-    if (!session.display || !CGDisplayIsActive(display))
-        return;
+    if (!session.display)
+        return false;
+    if (!CGDisplayIsActive(display)) {
+        if (session.ever_settled)
+            return false;
+        if (session.waits++ % 20 == 0)
+            vd_log("waiting for the virtual display to become active, check", session.waits);
+        return session.waits < VD_MAX_WAITS;
+    }
+    session.waits = 0;
 
     bool mirrored = mirrors(display);
     if (mirrored && CGDisplayIsMain(display)) {
         if (!session.settled)
             vd_log("virtual display is main and mirrored, display", display);
         session.settled = true;
+        session.ever_settled = true;
         session.attempts = 0;
         session.forces = 0;
-        return;
+        return false;
     }
     if (session.settled)
         vd_log("macOS changed the arrangement, applying it again for display", display);
     session.settled = false;
 
     if (session.attempts >= VD_MAX_ATTEMPTS)
-        return;
+        return false;
     if (++session.attempts == VD_MAX_ATTEMPTS)
         vd_log("giving up after attempts", VD_MAX_ATTEMPTS);
 
@@ -326,12 +338,12 @@ static void ensure(void)
         mirrored = mirror_onto(display);
         if (!mirrored) {
             restore_origins();
-            return;
+            return true;
         }
     }
 
     if (CGDisplayIsMain(display) || session.forces >= VD_MAX_FORCES)
-        return;
+        return true;
     vd_log("mirrored but not main, forcing the main role, try", ++session.forces);
     if (unmirror())
         make_main(display);
@@ -339,6 +351,7 @@ static void ensure(void)
         restore_origins();
         mirror_onto(display);
     }
+    return true;
 }
 
 static void retry(void *context)
@@ -346,8 +359,7 @@ static void retry(void *context)
     if ((uintptr_t)context != session.generation)
         return;
     session.retry_armed = false;
-    ensure();
-    if (session.display && !session.settled && session.attempts < VD_MAX_ATTEMPTS) {
+    if (ensure()) {
         session.retry_armed = true;
         dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, VD_RETRY_NS), dispatch_get_main_queue(), context, retry);
     }
@@ -355,7 +367,7 @@ static void retry(void *context)
 
 static void arm_retry(void)
 {
-    if (session.retry_armed || !session.display || session.settled || session.attempts >= VD_MAX_ATTEMPTS)
+    if (session.retry_armed)
         return;
     session.retry_armed = true;
     dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, VD_RETRY_NS), dispatch_get_main_queue(), (void *)session.generation, retry);
@@ -365,8 +377,8 @@ static void refresh(void *context)
 {
     (void)context;
     __atomic_store_n(&refresh_queued, 0, __ATOMIC_RELEASE);
-    ensure();
-    arm_retry();
+    if (ensure())
+        arm_retry();
 }
 
 static void reconfigured(CGDirectDisplayID display, CGDisplayChangeSummaryFlags flags, void *context)
@@ -390,8 +402,10 @@ static void teardown(void)
     session.generation++;
     session.retry_armed = false;
     session.settled = false;
+    session.ever_settled = false;
     session.attempts = 0;
     session.forces = 0;
+    session.waits = 0;
     restore();
     void *pool = objc_autoreleasePoolPush();
     release(display);
@@ -529,8 +543,8 @@ static int start_on_main(void *argument)
         teardown();
         return -1;
     }
-    ensure();
-    arm_retry();
+    if (ensure())
+        arm_retry();
     return 0;
 }
 
