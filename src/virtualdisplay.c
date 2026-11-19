@@ -152,14 +152,14 @@ static CGDisplayConfigRef begin_configuration(void)
     return config;
 }
 
-static bool finish_configuration(CGDisplayConfigRef config, CGError error, const char *action)
+static bool finish_configuration(CGDisplayConfigRef config, CGError error, CGConfigureOption option, const char *action)
 {
     if (error != kCGErrorSuccess) {
         CGCancelDisplayConfiguration(config);
         fprintf(stderr, "[virtualdisplay] %s was rejected, error %d\n", action, error);
         return false;
     }
-    error = CGCompleteDisplayConfiguration(config, kCGConfigureForAppOnly);
+    error = CGCompleteDisplayConfiguration(config, option);
     if (error != kCGErrorSuccess) {
         fprintf(stderr, "[virtualdisplay] %s could not be applied, error %d\n", action, error);
         return false;
@@ -195,7 +195,7 @@ static bool unmirror(void)
     CGDisplayConfigRef config = begin_configuration();
     if (!config)
         return false;
-    return finish_configuration(config, CGConfigureDisplayMirrorOfDisplay(config, session.physical, kCGNullDirectDisplay), "Breaking the mirror");
+    return finish_configuration(config, CGConfigureDisplayMirrorOfDisplay(config, session.physical, kCGNullDirectDisplay), kCGConfigureForAppOnly, "Breaking the mirror");
 }
 
 static bool mirror_onto(CGDirectDisplayID master)
@@ -211,7 +211,7 @@ static bool mirror_onto(CGDirectDisplayID master)
     CGDisplayConfigRef config = begin_configuration();
     if (!config)
         return false;
-    if (!finish_configuration(config, CGConfigureDisplayMirrorOfDisplay(config, session.physical, master), "Mirroring"))
+    if (!finish_configuration(config, CGConfigureDisplayMirrorOfDisplay(config, session.physical, master), kCGConfigureForAppOnly, "Mirroring"))
         return false;
     return mirrors(master);
 }
@@ -242,7 +242,7 @@ static bool make_main(CGDirectDisplayID target)
     CGError error = kCGErrorSuccess;
     for (uint32_t index = 0; index < count && error == kCGErrorSuccess; index++)
         error = CGConfigureDisplayOrigin(config, current[index].display, current[index].x - dx, current[index].y - dy);
-    if (!finish_configuration(config, error, "Moving the virtual display to the main position"))
+    if (!finish_configuration(config, error, kCGConfigureForSession, "Moving the virtual display to the main position"))
         return false;
 
     if (!session.swapped) {
@@ -275,7 +275,7 @@ static void restore_origins(void)
     if (error == kCGErrorSuccess && !physical_saved)
         error = CGConfigureDisplayOrigin(config, session.physical, 0, 0);
     session.origin_count = 0;
-    finish_configuration(config, error, "Restoring the display arrangement");
+    finish_configuration(config, error, kCGConfigureForSession, "Restoring the display arrangement");
 }
 
 static void restore(void)
@@ -289,7 +289,7 @@ static void restore(void)
                 error = CGConfigureDisplayMirrorOfDisplay(config, session.physical, kCGNullDirectDisplay);
             if (error == kCGErrorSuccess && session.physical_mode)
                 error = CGConfigureDisplayWithDisplayMode(config, session.physical, session.physical_mode, NULL);
-            finish_configuration(config, error, "Restoring the physical display");
+            finish_configuration(config, error, kCGConfigureForAppOnly, "Restoring the physical display");
         }
     }
     restore_origins();
