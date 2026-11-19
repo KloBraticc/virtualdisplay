@@ -24,6 +24,7 @@
 #define VD_MAX_FORCES 3
 #define VD_MAX_WAITS 100
 #define VD_RETRY_NS (50 * NSEC_PER_MSEC)
+#define VD_RECHECK_NS (300 * NSEC_PER_MSEC)
 #define VD_DEFAULT_NAME "Voidstrap Virtual Display"
 
 extern void *objc_autoreleasePoolPush(void);
@@ -373,10 +374,26 @@ static void arm_retry(void)
     dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, VD_RETRY_NS), dispatch_get_main_queue(), (void *)session.generation, retry);
 }
 
+static void recheck(void *context)
+{
+    if ((uintptr_t)context != session.generation)
+        return;
+    session.retry_armed = false;
+    if (ensure())
+        arm_retry();
+}
+
 static void refresh(void *context)
 {
     (void)context;
     __atomic_store_n(&refresh_queued, 0, __ATOMIC_RELEASE);
+    if (session.retry_armed || !session.display)
+        return;
+    if (session.settled) {
+        session.retry_armed = true;
+        dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, VD_RECHECK_NS), dispatch_get_main_queue(), (void *)session.generation, recheck);
+        return;
+    }
     if (ensure())
         arm_retry();
 }
