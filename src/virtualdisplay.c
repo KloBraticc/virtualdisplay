@@ -30,6 +30,9 @@
 #define VD_RECHECK_NS (300 * NSEC_PER_MSEC)
 #define VD_SETTLE_CHECKS 100
 #define VD_SETTLE_US 10000
+#define VD_REMOVE_CHECKS 300
+#define VD_VENDOR 0x3456
+#define VD_PRODUCT 0x1234
 #define VD_DEFAULT_NAME "Voidstrap Virtual Display"
 
 extern void *objc_autoreleasePoolPush(void);
@@ -195,6 +198,24 @@ static bool contains(const CGDirectDisplayID *displays, uint32_t count, CGDirect
         if (displays[index] == display)
             return true;
     return false;
+}
+
+static bool leftover_online(void)
+{
+    CGDirectDisplayID displays[VD_MAX_DISPLAYS];
+    uint32_t count = 0;
+    if (CGGetOnlineDisplayList(VD_MAX_DISPLAYS, displays, &count) != kCGErrorSuccess)
+        return false;
+    for (uint32_t index = 0; index < count && index < VD_MAX_DISPLAYS; index++)
+        if (CGDisplayVendorNumber(displays[index]) == VD_VENDOR && CGDisplayModelNumber(displays[index]) == VD_PRODUCT)
+            return true;
+    return false;
+}
+
+static void wait_for_removal(void)
+{
+    for (int check = 0; check < VD_REMOVE_CHECKS && leftover_online(); check++)
+        usleep(VD_SETTLE_US);
 }
 
 static bool mirrors(CGDirectDisplayID master)
@@ -504,6 +525,7 @@ static void teardown(void)
     release(display);
     objc_autoreleasePoolPop(pool);
     session.virtual_display = kCGNullDirectDisplay;
+    wait_for_removal();
 }
 
 static void terminated(void)
@@ -568,8 +590,8 @@ static id create_display(const vd_geometry *geometry)
     send_u32(descriptor, "setMaxPixelsWide:", geometry->pixel_width);
     send_u32(descriptor, "setMaxPixelsHigh:", geometry->pixel_height);
     send_size(descriptor, "setSizeInMillimeters:", geometry->size_mm);
-    send_u32(descriptor, "setProductID:", 0x1234);
-    send_u32(descriptor, "setVendorID:", 0x3456);
+    send_u32(descriptor, "setProductID:", VD_PRODUCT);
+    send_u32(descriptor, "setVendorID:", VD_VENDOR);
     send_u32(descriptor, "setSerialNum:", 0x0002);
     send_object(descriptor, "setTerminationHandler:", (id)^(id removed, id error) {
         (void)removed;
@@ -616,6 +638,7 @@ static int start_on_main(void *argument)
         return 0;
     if (!configured)
         return -1;
+    wait_for_removal();
     CGDirectDisplayID physical = CGDisplayPrimaryDisplay(CGMainDisplayID());
     vd_geometry geometry;
     if (!physical || !measure(physical, &geometry))
