@@ -171,6 +171,7 @@ static bool finish_configuration(CGDisplayConfigRef config, CGError error, CGCon
         return false;
     }
     error = CGCompleteDisplayConfiguration(config, option);
+    fprintf(stderr, "[virtualdisplay] trace at %llu ms, %s finished with %d\n", elapsed_ms(), action, error);
     if (error != kCGErrorSuccess) {
         fprintf(stderr, "[virtualdisplay] %s could not be applied, error %d\n", action, error);
         return false;
@@ -376,6 +377,8 @@ static bool ensure(void)
     session.waits = 0;
 
     bool mirrored = mirrors(display);
+    if (!session.settled)
+        fprintf(stderr, "[virtualdisplay] trace at %llu ms, mirrored %d main %d in mirror set %d attempts %u forces %u\n", elapsed_ms(), mirrored, CGDisplayIsMain(display), CGDisplayIsInMirrorSet(session.physical), session.attempts, session.forces);
     if (mirrored && CGDisplayIsMain(display)) {
         if (!session.settled)
             fprintf(stderr, "[virtualdisplay] virtual display is main and mirrored at %llu ms, display %u\n", elapsed_ms(), display);
@@ -465,6 +468,8 @@ static void reconfigured(CGDirectDisplayID display, CGDisplayChangeSummaryFlags 
     if (flags & kCGDisplayBeginConfigurationFlag)
         return;
     __atomic_fetch_or(&change_flags, flags, __ATOMIC_ACQ_REL);
+    if (!session.settled)
+        fprintf(stderr, "[virtualdisplay] trace at %llu ms, change %u flags %#x\n", elapsed_ms(), display, flags);
     if (__atomic_exchange_n(&refresh_queued, 1, __ATOMIC_ACQ_REL))
         return;
     dispatch_async_f(dispatch_get_main_queue(), NULL, refresh);
