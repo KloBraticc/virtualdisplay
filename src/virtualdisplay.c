@@ -252,16 +252,17 @@ static bool mirror_onto(CGDirectDisplayID master)
         session.physical_mode = CGDisplayCopyDisplayMode(session.physical);
     if (!unmirror())
         return false;
+    CGDisplayModeRef mode = preferred_mode(master);
+    if (mode) {
+        CGDisplayConfigRef config = begin_configuration();
+        if (config)
+            finish_configuration(config, CGConfigureDisplayWithDisplayMode(config, master, mode, NULL), kCGConfigureForAppOnly, "Selecting the refresh rate");
+        CGDisplayModeRelease(mode);
+    }
     CGDisplayConfigRef config = begin_configuration();
     if (!config)
         return false;
-    CGDisplayModeRef mode = preferred_mode(master);
-    CGError error = mode ? CGConfigureDisplayWithDisplayMode(config, master, mode, NULL) : kCGErrorSuccess;
-    if (mode)
-        CGDisplayModeRelease(mode);
-    if (error == kCGErrorSuccess)
-        error = CGConfigureDisplayMirrorOfDisplay(config, session.physical, master);
-    if (!finish_configuration(config, error, kCGConfigureForAppOnly, "Mirroring"))
+    if (!finish_configuration(config, CGConfigureDisplayMirrorOfDisplay(config, session.physical, master), kCGConfigureForAppOnly, "Mirroring"))
         return false;
     return mirrors(master);
 }
