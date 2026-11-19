@@ -494,7 +494,7 @@ static void reconfigured(CGDirectDisplayID display, CGDisplayChangeSummaryFlags 
     (void)context;
     if (flags & kCGDisplayBeginConfigurationFlag)
         return;
-    if ((flags & kCGDisplayAddFlag) && display == session.virtual_display)
+    if ((flags & (kCGDisplayAddFlag | kCGDisplayEnabledFlag)) && display == session.virtual_display)
         session.added = true;
     __atomic_fetch_or(&change_flags, flags, __ATOMIC_ACQ_REL);
     if (!session.settled)
