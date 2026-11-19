@@ -25,6 +25,7 @@
 #define VD_MAX_ATTEMPTS 30
 #define VD_MAX_FORCES 3
 #define VD_MAX_WAITS 100
+#define VD_MODE_CHECKS 20
 #define VD_RETRY_NS (50 * NSEC_PER_MSEC)
 #define VD_RECHECK_NS (300 * NSEC_PER_MSEC)
 #define VD_SETTLE_CHECKS 100
@@ -76,6 +77,7 @@ static struct {
     uint32_t attempts;
     uint32_t forces;
     uint32_t waits;
+    uint32_t mode_checks;
     uintptr_t generation;
     bool swapped;
     bool settled;
@@ -264,12 +266,15 @@ static bool mirror_onto(CGDirectDisplayID master)
         session.physical_mode = CGDisplayCopyDisplayMode(session.physical);
     if (!unmirror())
         return false;
-    CGDisplayModeRef mode = preferred_mode(master);
+    CGDisplayModeRef mode = session.mode_checks < VD_MODE_CHECKS ? preferred_mode(master) : NULL;
     if (mode) {
-        CGDisplayConfigRef config = begin_configuration();
-        if (config)
-            finish_configuration(config, CGConfigureDisplayWithDisplayMode(config, master, mode, NULL), kCGConfigureForAppOnly, "Selecting the refresh rate");
+        if (session.mode_checks++ == 0) {
+            CGDisplayConfigRef config = begin_configuration();
+            if (config)
+                finish_configuration(config, CGConfigureDisplayWithDisplayMode(config, master, mode, NULL), kCGConfigureForAppOnly, "Selecting the refresh rate");
+        }
         CGDisplayModeRelease(mode);
+        return false;
     }
     CGDisplayConfigRef config = begin_configuration();
     if (!config)
@@ -387,6 +392,7 @@ static bool ensure(void)
         session.ever_settled = true;
         session.attempts = 0;
         session.forces = 0;
+        session.mode_checks = 0;
         return false;
     }
     if (session.settled)
@@ -489,6 +495,7 @@ static void teardown(void)
     session.attempts = 0;
     session.forces = 0;
     session.waits = 0;
+    session.mode_checks = 0;
     CGDirectDisplayID physical = session.physical;
     restore();
     for (int check = 0; check < VD_SETTLE_CHECKS && (CGDisplayIsInMirrorSet(physical) || CGMainDisplayID() != physical); check++)
