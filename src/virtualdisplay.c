@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #define VD_NAME_CAPACITY 128
 #define VD_MAX_RATES 16
@@ -25,6 +26,8 @@
 #define VD_MAX_WAITS 100
 #define VD_RETRY_NS (50 * NSEC_PER_MSEC)
 #define VD_RECHECK_NS (300 * NSEC_PER_MSEC)
+#define VD_SETTLE_CHECKS 100
+#define VD_SETTLE_US 10000
 #define VD_DEFAULT_NAME "Voidstrap Virtual Display"
 
 extern void *objc_autoreleasePoolPush(void);
@@ -471,7 +474,10 @@ static void teardown(void)
     session.attempts = 0;
     session.forces = 0;
     session.waits = 0;
+    CGDirectDisplayID physical = session.physical;
     restore();
+    for (int check = 0; check < VD_SETTLE_CHECKS && (CGDisplayIsInMirrorSet(physical) || CGMainDisplayID() != physical); check++)
+        usleep(VD_SETTLE_US);
     void *pool = objc_autoreleasePoolPush();
     release(display);
     objc_autoreleasePoolPop(pool);
