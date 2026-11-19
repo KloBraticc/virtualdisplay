@@ -198,6 +198,50 @@ static bool unmirror(void)
     return finish_configuration(config, CGConfigureDisplayMirrorOfDisplay(config, session.physical, kCGNullDirectDisplay), kCGConfigureForAppOnly, "Breaking the mirror");
 }
 
+static CGDisplayModeRef preferred_mode(CGDirectDisplayID display)
+{
+    if (!settings.rate_count)
+        return NULL;
+    double rate = settings.rates[0];
+    CGDisplayModeRef current = CGDisplayCopyDisplayMode(display);
+    if (!current)
+        return NULL;
+    if (fabs(CGDisplayModeGetRefreshRate(current) - rate) < 0.5) {
+        CGDisplayModeRelease(current);
+        return NULL;
+    }
+    size_t width = CGDisplayModeGetWidth(current);
+    size_t height = CGDisplayModeGetHeight(current);
+    size_t pixel_width = CGDisplayModeGetPixelWidth(current);
+    CGDisplayModeRelease(current);
+
+    const void *keys[] = {kCGDisplayShowDuplicateLowResolutionModes};
+    const void *values[] = {kCFBooleanTrue};
+    CFDictionaryRef options = CFDictionaryCreate(NULL, keys, values, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFArrayRef modes = CGDisplayCopyAllDisplayModes(display, options);
+    if (options)
+        CFRelease(options);
+    if (!modes)
+        return NULL;
+
+    CGDisplayModeRef best = NULL;
+    int best_score = -1;
+    for (CFIndex index = 0; index < CFArrayGetCount(modes); index++) {
+        CGDisplayModeRef mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, index);
+        if (fabs(CGDisplayModeGetRefreshRate(mode) - rate) >= 0.5)
+            continue;
+        int score = (CGDisplayModeGetWidth(mode) == width && CGDisplayModeGetHeight(mode) == height) * 2 + (CGDisplayModeGetPixelWidth(mode) == pixel_width);
+        if (score > best_score) {
+            best = mode;
+            best_score = score;
+        }
+    }
+    if (best)
+        CGDisplayModeRetain(best);
+    CFRelease(modes);
+    return best;
+}
+
 static bool mirror_onto(CGDirectDisplayID master)
 {
     if (mirrors(master))
@@ -211,7 +255,13 @@ static bool mirror_onto(CGDirectDisplayID master)
     CGDisplayConfigRef config = begin_configuration();
     if (!config)
         return false;
-    if (!finish_configuration(config, CGConfigureDisplayMirrorOfDisplay(config, session.physical, master), kCGConfigureForAppOnly, "Mirroring"))
+    CGDisplayModeRef mode = preferred_mode(master);
+    CGError error = mode ? CGConfigureDisplayWithDisplayMode(config, master, mode, NULL) : kCGErrorSuccess;
+    if (mode)
+        CGDisplayModeRelease(mode);
+    if (error == kCGErrorSuccess)
+        error = CGConfigureDisplayMirrorOfDisplay(config, session.physical, master);
+    if (!finish_configuration(config, error, kCGConfigureForAppOnly, "Mirroring"))
         return false;
     return mirrors(master);
 }
