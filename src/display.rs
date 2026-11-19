@@ -167,7 +167,7 @@ fn build_config(meta: &DisplayMeta) -> Option<Config<'_>> {
     }
 
     Some(Config {
-        name: meta.name.as_deref().unwrap_or("Froststrap Virtual Display"),
+        name: meta.name.as_deref().unwrap_or("Voidstrap Virtual Display"),
         pixel_width: u32::try_from(pixel_width).ok()?,
         pixel_height: u32::try_from(pixel_height).ok()?,
         size_mm,
